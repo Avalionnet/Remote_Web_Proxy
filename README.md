@@ -1,5 +1,7 @@
 # CS3103 Programming Assignment
 
+or view it on GitHub: (https://github.com/Avalionnet/remote_web_proxy/blob/main/README.md)
+
 ## Running the Proxy
 #### Please refer to the following instructions to run and compile your proxy server:
 
@@ -19,9 +21,14 @@ Additionally, as stated in Piazza, telemetry results are not configured to match
 
 This is made possible by the following clause announced in the updated FAQ:
 
+If image is missing, please refer to markdown
+
 ![image](https://user-images.githubusercontent.com/48002577/202707570-1b8c1fc6-a838-47dc-9fc0-6b43b005a308.png)
 
 ## Telemetry for sample testcases provided
+
+If image is missing, please refer to markdown
+
 ![image](https://user-images.githubusercontent.com/48002577/202711688-e329d283-94bb-4fdc-8d31-5cfd81ac5b58.png)
 
 
@@ -31,6 +38,8 @@ When the attacker mode is engaged, it overwrites all incoming HTTP requests with
 
 ## Extra
 Input validation is also added for the proxy server and invalid flags (Attacker and Image Substitution) will result in the termination of the program with the following error messages:
+
+If image is missing, please refer to markdown
 
 ![image](https://user-images.githubusercontent.com/48002577/202708599-99ed5e92-dbb5-4a5c-be68-fabc7a665aca.png)
 

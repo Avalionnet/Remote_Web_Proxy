@@ -212,7 +212,6 @@ def findPayloadSize(resp):
         split = resp.find(b'\r\n\r\n')
         content = resp[split+4:]
         length = str(len(content))
-        print("new")
         # payload = decodedResp[payloadIdx+4:]
         # encodedPayload = bytes(payload, "ISO-8859-1")
         # length = str(len(encodedPayload))
@@ -311,7 +310,7 @@ def proxyServer(port, imgSub, attackerMode):
     objQueue = Queue()
     teleThread = threading.Thread(target=printThread, args=(objQueue,None))
     teleThread.start()
-    print(f"[Server Activated] Listening on {ipAddress}:{port}")
+    # print(f"[Server Activated] Listening on {ipAddress}:{port}")
     count = 0
     while True:
         connection, addr = server.accept()
