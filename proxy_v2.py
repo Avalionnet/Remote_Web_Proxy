@@ -25,8 +25,13 @@ def fetchArgs():
 ###################### Verification Functions ############################
 
 def verifyRequestLine(requestLine):
+    # add exceptions !!!!
     if len(requestLine) != 3:
         print("[Request Line Len] 400 - Bad Request")
+        return True
+        
+    if requestLine[0] != GET_REQ:
+        print("[Request Type not GET] 400 - Bad Request")
         return True
     
     if requestLine[2] not in HTTP_VERSIONS:
@@ -35,10 +40,13 @@ def verifyRequestLine(requestLine):
     
     return False
 
-def retrieveHost(msg):
+def retrieveHost(msg, reqLine):
     hostIdx = None
     host = None
     port = None
+    
+    if reqLine[2] != HTTP_VERSIONS[1]:
+        return host, port
     
     for i in range(1, len(msg)):
         if msg[i].startswith(HOST_TAG):
@@ -61,6 +69,7 @@ def deconstructReqLine(requestLine):
         urlParts = url.split("://")
         if len(urlParts) != 2 or urlParts[0] not in HTTP_TAGS:
             isInvalid = True
+            print("Error")
         url = urlParts[1]
     
     pathIdx = url.find("/")
@@ -78,7 +87,7 @@ def deconstructReqLine(requestLine):
         hostWithoutPort = hostLink.split(":")
         hostLink = hostWithoutPort[0]
         if hostWithoutPort[1].isdigit():
-            port = int(hostWithoutPort[1])
+                port = int(hostWithoutPort[1])
         else:
             isInvalid = True
     
@@ -130,22 +139,27 @@ def handleClientReq(conn, addr, imgSub, attackerMode):
             return attack(conn)
         
         # Checks for carriage return at the end of header lines
-        # if msg[-4:] != HTTP_MSG_TERMINATION:
-        #     isBadRequest = True
-        #     print("[Missing Termination] 404 - Bad Request")
+        if msg[-4:] != HTTP_MSG_TERMINATION:
+            isBadRequest = True
+            print("[Missing Termination] 404 - Bad Request")
         
-        msg = msg.decode("utf-8")
+        msg = msg.decode("ISO-8859-1")
         print(f"\n[Client Message]:\n{msg}")
         msg = msg.split("\r\n")
         
         # Check if request line is of the right format
         requestLine = msg[0].split(" ")
+        
         isBadRequest = verifyRequestLine(requestLine) or isBadRequest
-
-        host, webServerPort = retrieveHost(msg)
+        if isBadRequest:
+            print("\n[SENDING BAD REQUEST]")
+            conn.sendall(BAD_RESPONSE)
+            conn.close()
+            return
+        
+        host, webServerPort = retrieveHost(msg, requestLine)
         hostLink, hostPort, urlPath, isUrlValid = deconstructReqLine(requestLine)
         isBadRequest = isUrlValid or isBadRequest
-        
         reconstructedReqLine = reconstructReqLine(requestLine, urlPath)
         newReq = reconstructRequest(reconstructedReqLine, msg)
         
@@ -166,7 +180,10 @@ def handleClientReq(conn, addr, imgSub, attackerMode):
         else:
             print("[RECONSTRUCTED REQUEST]")
             print(newReq)
-            connectWebServer(conn, newReq, host, int(webServerPort), imgSub, attackerMode)    
+            webServerResp = connectWebServer(conn, newReq, host, int(hostPort), imgSub, attackerMode)
+            if webServerResp == 0:
+                conn.close()
+                return   
     conn.close()
 
 def isImgContent(resp):
@@ -181,7 +198,7 @@ def isImgContent(resp):
 
 def connectWebServer(browserSocket, request, host, port, imgSub, attackerMode):
     webServerSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    webServerSocket.settimeout(10)
+    webServerSocket.settimeout(2)
     
     if imgSub == 1:
         ogReq = request.decode("utf-8")
@@ -195,9 +212,10 @@ def connectWebServer(browserSocket, request, host, port, imgSub, attackerMode):
         else:
             webServerSocket.sendall(newReqBytes)
     except:
-        # browserSocket.sendall(BAD_RESPONSE)
-        # webServerSocket.close()
-        return
+        print("\n[BAD REQUEST URL PORT ISSUE -> BROWSER]")
+        browserSocket.sendall(BAD_RESPONSE)
+        webServerSocket.close()
+        return 0
 
     response = b""
     responseChunk = b""
@@ -211,6 +229,8 @@ def connectWebServer(browserSocket, request, host, port, imgSub, attackerMode):
         if len(responseChunk) > 0:
             response += responseChunk
         else:
+            break
+        if timeoutFlag:
             break
     
     print("\n[RESPONSE FROM WEBSERVER]")
@@ -227,8 +247,9 @@ def connectWebServer(browserSocket, request, host, port, imgSub, attackerMode):
         else:
             webServerSocket.close()
             return connectWebServer(browserSocket, request, host, port, 0, attackerMode)
-    
+        
     if len(response) == 0 and timeoutFlag:
+        print("\n[BAD REQUEST -> BROWSER]")
         browserSocket.sendall(BAD_RESPONSE)
     else:
         print("\n[SENDING PROXY -> BROWSER]")
@@ -236,6 +257,7 @@ def connectWebServer(browserSocket, request, host, port, imgSub, attackerMode):
         print("\n[SENT COMPLETE PROXY -> BROWSER]")
     
     webServerSocket.close()
+    return 1
 
 def proxyServer(port, imgSub, attackerMode):
     ipAddress = socket.gethostbyname(socket.gethostname())

@@ -1,6 +1,9 @@
 import sys
 import socket
 import threading
+from threading import current_thread
+from queue import Queue
+import time
 
 HTTP_MSG_TERMINATION = b'\r\n\r\n'
 GET_REQ = "GET"
@@ -25,20 +28,28 @@ def fetchArgs():
 ###################### Verification Functions ############################
 
 def verifyRequestLine(requestLine):
+    # add exceptions !!!!
     if len(requestLine) != 3:
-        print("[Request Line Len] 400 - Bad Request")
+        # print("[Request Line Len] 400 - Bad Request")
+        return True
+        
+    if requestLine[0] != GET_REQ:
+        # print("[Request Type not GET] 400 - Bad Request")
         return True
     
     if requestLine[2] not in HTTP_VERSIONS:
-        print("[Invalid HTTP Ver] 400 - Bad Request")
+        # print("[Invalid HTTP Ver] 400 - Bad Request")
         return True
     
     return False
 
-def retrieveHost(msg):
+def retrieveHost(msg, reqLine):
     hostIdx = None
     host = None
     port = None
+    
+    if reqLine[2] != HTTP_VERSIONS[1]:
+        return host, port
     
     for i in range(1, len(msg)):
         if msg[i].startswith(HOST_TAG):
@@ -61,6 +72,7 @@ def deconstructReqLine(requestLine):
         urlParts = url.split("://")
         if len(urlParts) != 2 or urlParts[0] not in HTTP_TAGS:
             isInvalid = True
+            # print("Error")
         url = urlParts[1]
     
     pathIdx = url.find("/")
@@ -78,7 +90,7 @@ def deconstructReqLine(requestLine):
         hostWithoutPort = hostLink.split(":")
         hostLink = hostWithoutPort[0]
         if hostWithoutPort[1].isdigit():
-            port = int(hostWithoutPort[1])
+                port = int(hostWithoutPort[1])
         else:
             isInvalid = True
     
@@ -102,16 +114,19 @@ def reconstructRequest(reqLine, msg):
 
 ###################### Handle Client Thread ############################
 
-def attack(conn):
-    print("[ATTACKING]")
-    attackResponse = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n<header><title>You are being attacked</title></header><body><h1>You are being attacked</h1></body>"
-    conn.send(bytes(attackResponse, "UTF-8"))
-    print("[ATTACK COMPLETED]")
+def attack(conn, url):
+    # print("[ATTACKING]")
+    attackResponse = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n"
+    attackMsg = "<header><title>You are being attacked</title></header><body><h1>You are being attacked</h1></body>"
+    conn.sendall(bytes(attackResponse, "UTF-8"))
+    conn.sendall(bytes(attackMsg, "UTF-8"))
+    print(url + ", " + str(len(attackMsg)))
+    # print("[ATTACK COMPLETED]")
     conn.close()
     return
 
-def handleClientReq(conn, addr, imgSub, attackerMode):
-    print(f"[Server] Client Connected: {addr}")
+def handleClientReq(conn, addr, imgSub, attackerMode, q):
+    # print(f"[Server] Client Connected: {addr}")
     
     isBadRequest = False
     msg = None
@@ -126,26 +141,31 @@ def handleClientReq(conn, addr, imgSub, attackerMode):
         if msg is None:
             break
         
-        if attackerMode == 1:
-            return attack(conn)
-        
         # Checks for carriage return at the end of header lines
-        # if msg[-4:] != HTTP_MSG_TERMINATION:
-        #     isBadRequest = True
-        #     print("[Missing Termination] 404 - Bad Request")
+        if msg[-4:] != HTTP_MSG_TERMINATION:
+            isBadRequest = True
+            # print("[Missing Termination] 404 - Bad Request")
         
-        msg = msg.decode("utf-8")
-        print(f"\n[Client Message]:\n{msg}")
+        msg = msg.decode("ISO-8859-1")
+        # print(f"\n[Client Message]:\n{msg}")
         msg = msg.split("\r\n")
         
         # Check if request line is of the right format
         requestLine = msg[0].split(" ")
+        
         isBadRequest = verifyRequestLine(requestLine) or isBadRequest
-
-        host, webServerPort = retrieveHost(msg)
+        if isBadRequest:
+            # print("\n[SENDING BAD REQUEST]")
+            conn.sendall(BAD_RESPONSE)
+            conn.close()
+            return
+        
+        if attackerMode == 1:
+            return attack(conn, requestLine[1])
+        
+        host, webServerPort = retrieveHost(msg, requestLine)
         hostLink, hostPort, urlPath, isUrlValid = deconstructReqLine(requestLine)
         isBadRequest = isUrlValid or isBadRequest
-        
         reconstructedReqLine = reconstructReqLine(requestLine, urlPath)
         newReq = reconstructRequest(reconstructedReqLine, msg)
         
@@ -159,29 +179,55 @@ def handleClientReq(conn, addr, imgSub, attackerMode):
                 isBadRequest = False
         
         if isBadRequest:
-            print("\n[SENDING BAD REQUEST]")
+            # print("\n[SENDING BAD REQUEST]")
             conn.sendall(BAD_RESPONSE)
             conn.close()
             return
         else:
-            print("[RECONSTRUCTED REQUEST]")
-            print(newReq)
-            connectWebServer(conn, newReq, host, int(webServerPort), imgSub, attackerMode)    
+            # print("[RECONSTRUCTED REQUEST]")
+            # print(newReq)
+            webServerResp = connectWebServer(conn, newReq, host, int(hostPort), imgSub, attackerMode, requestLine[1])
+            if webServerResp == 0:
+                conn.close()
+                return   
     conn.close()
 
 def isImgContent(resp):
-    response = resp.decode("utf-8")
+    response = resp.decode("ISO-8859-1")
     response = response.split("\r\n")
     for i in range(0,len(response)):
         if response[i].startswith("Content-Type: image"):
-            print("\n[IS IMG CONTENT RESPONSE]: " + response[i])
+            # print("\n[IS IMG CONTENT RESPONSE]: " + response[i])
             return True
     return False
 
+def findPayloadSize(resp):
+    length = ""
+    
+    decodedResp = resp.decode("ISO-8859-1")
+    payloadIdx = decodedResp.find("\r\n\r\n", 1)
+    
+    header = decodedResp[:payloadIdx]
+    contentIdx = header.find("Content-Length: ")
+    
+    if contentIdx != -1:
+        endOfContent = header[contentIdx:].find("\r\n", 1)
+        value = header[contentIdx:][:endOfContent]
+        valueArr = value.split(": ")
+        # print(header[contentIdx:])
+        length = valueArr[1]
+    else:
+        payload = decodedResp[payloadIdx+4:]
+        encodedPayload = bytes(payload, "ISO-8859-1")
+        length = str(len(encodedPayload))
+    
+    # print("[OG SIZE]: " + str(len(resp)) + " [OG AFT DECODE]: " + str(len(decodedResp)) + " [PAYLOAD SIZE]: " + length + "\n")
 
-def connectWebServer(browserSocket, request, host, port, imgSub, attackerMode):
+    return length
+
+def connectWebServer(browserSocket, request, host, port, imgSub, attackerMode, url):
     webServerSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    webServerSocket.settimeout(10)
+    webServerSocket.settimeout(2)
     
     if imgSub == 1:
         ogReq = request.decode("utf-8")
@@ -195,9 +241,10 @@ def connectWebServer(browserSocket, request, host, port, imgSub, attackerMode):
         else:
             webServerSocket.sendall(newReqBytes)
     except:
-        # browserSocket.sendall(BAD_RESPONSE)
-        # webServerSocket.close()
-        return
+        # print("\n[BAD REQUEST URL PORT ISSUE -> BROWSER]")
+        browserSocket.sendall(BAD_RESPONSE)
+        webServerSocket.close()
+        return 0
 
     response = b""
     responseChunk = b""
@@ -212,30 +259,61 @@ def connectWebServer(browserSocket, request, host, port, imgSub, attackerMode):
             response += responseChunk
         else:
             break
+        if timeoutFlag:
+            break
     
-    print("\n[RESPONSE FROM WEBSERVER]")
-    print(response)
+    # print("\n[RESPONSE FROM WEBSERVER]")
+    # print(response)
     
     if imgSub == 1:
         if isImgContent(response):
-            print("\n[REPLACING IMAGE]")
+            # print("\n[REPLACING IMAGE]")
             subHost = "ocna0.d2.comp.nus.edu.sg"
             subPort = 50000
             substitute = b"GET /change.jpg HTTP/1.1\r\nHost: ocna0.d2.comp.nus.edu.sg:50000\r\n\r\n"
             webServerSocket.close()
-            return connectWebServer(browserSocket, substitute, subHost, subPort, 0, attackerMode)
+            return connectWebServer(browserSocket, substitute, subHost, subPort, 0, attackerMode, url)
         else:
             webServerSocket.close()
-            return connectWebServer(browserSocket, request, host, port, 0, attackerMode)
-    
+            return connectWebServer(browserSocket, request, host, port, 0, attackerMode, url)
+        
     if len(response) == 0 and timeoutFlag:
+        # print("\n[BAD REQUEST -> BROWSER]")
         browserSocket.sendall(BAD_RESPONSE)
     else:
-        print("\n[SENDING PROXY -> BROWSER]")
+        # print("\n[SENDING PROXY -> BROWSER]")
         browserSocket.sendall(response)
-        print("\n[SENT COMPLETE PROXY -> BROWSER]")
+        # print("\n[THREAD NAME]: " + current_thread().name)
+        payloadSize = findPayloadSize(response)
+        print(url + ", " + payloadSize)
+        # print("")
+        # print(response)
+        # print("\n[SENT COMPLETE PROXY -> BROWSER]")
     
     webServerSocket.close()
+    return 1
+
+def printThread(q):
+    while True:
+        totalSize = 0
+        timer = 0
+        collectedItems = []
+        while timer < 10:
+            try:
+                objSize = q.get_nowait()
+                
+                # If thread server is closed
+                if objSize is None:
+                    return
+                
+                collectedItems.append(objSize)
+                timer = 0
+                totalSize += objSize[1]
+            except:
+                timer += 1
+                time.sleep(1)                
+        siteName = collectedItems.pop(0)
+        print(siteName + ", " + str(totalSize))
 
 def proxyServer(port, imgSub, attackerMode):
     ipAddress = socket.gethostbyname(socket.gethostname())
@@ -243,13 +321,18 @@ def proxyServer(port, imgSub, attackerMode):
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, True)
     server.bind((ipAddress, port))
     server.listen()
-    print(f"[Server Activated] Listening on {ipAddress}:{port}")
+    # print(f"[Server Activated] Listening on {ipAddress}:{port}")
     
+    objQueue = Queue()
+    
+    count = 0
     while True:
         connection, addr = server.accept()
-        thread = threading.Thread(target=handleClientReq, args=(connection, addr, imgSub, attackerMode))
+        thread = threading.Thread(target=handleClientReq, args=(connection, addr, imgSub, attackerMode, objQueue))
+        thread.name = count
+        count += 1
         thread.start()
-        print(f"[Server] Active Threads: {threading.activeCount() - 1}")
+        # print(f"[Server] Active Threads: {threading.activeCount() - 1}")
 
 if __name__ == "__main__":
     port, imgSub, attackerMode = fetchArgs()
