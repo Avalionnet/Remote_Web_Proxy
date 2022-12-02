@@ -299,8 +299,8 @@ def proxyServer(port, imgSub, attackerMode):
     ipAddress = socket.gethostbyname(socket.gethostname())
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, True)
-    # server.bind((ipAddress, port))
-    server.bind(('0.0.0.0', port))
+    server.bind((ipAddress, port))
+    # server.bind(('0.0.0.0', port))
     server.listen()
     
     objQueue = Queue()

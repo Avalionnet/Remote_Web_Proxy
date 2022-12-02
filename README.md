@@ -1,5 +1,6 @@
 # CS3103 Programming Assignment
 
+By: Low Ming Lim
 or view it on GitHub: (https://github.com/Avalionnet/remote_web_proxy/blob/main/README.md)
 
 ## Running the Proxy
